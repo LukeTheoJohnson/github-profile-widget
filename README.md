@@ -1,18 +1,12 @@
 # github-profile-widget
 
-A self-updating GitHub profile widget that shows what you've shipped and what you've landed upstream — refreshed daily by GitHub Actions.
+A contribution summary widget. Refreshed daily by GitHub Actions.
 
 <a href="https://github.com/LukeTheoJohnson?tab=repositories">
 <img src="assets/widget.svg" alt="Profile widget demo" width="100%"/>
 </a>
 
-**Left column** — your non-fork public repos, sorted by recent activity, each with language, star count, and a 14-day commit heatmap.
-
-**Right column** — your merged pull requests grouped by upstream project over the last year, plus a 12-month cadence sparkline.
-
-**Header** — a generated "key insight" caption highlighting your highest-impact open-source contributions.
-
-Private repos are never included — merged-PR data is explicitly scoped to public repositories (`is:public`), so a local token and the Actions token produce identical output.
+Private repos are not included. merged PR data is explicitly scoped to public repositories (`is:public`), so a local token and the Actions token produce identical output.
 
 ---
 
