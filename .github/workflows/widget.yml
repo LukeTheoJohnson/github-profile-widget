@@ -1,0 +1,56 @@
+name: profile-widget
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily 06:17 UTC
+  workflow_dispatch: {}      # manual trigger from Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: widget
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r agent/requirements.txt
+
+      - name: Generate widget
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python agent/generate.py
+
+      - name: Commit if changed
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # The default branch is shared (daily schedule + manual pushes), so
+          # another commit can land between checkout and push. Rebuild our commit
+          # on the latest tip and retry, rather than failing on a non-fast-forward.
+          for i in 1 2 3; do
+            git fetch -q origin "$DEFAULT_BRANCH"
+            git reset --soft "origin/$DEFAULT_BRANCH"
+            git add assets/widget.svg
+            if git diff --cached --quiet; then
+              echo "no change"
+              exit 0
+            fi
+            git commit -m "chore: refresh profile widget"
+            if git push origin "HEAD:$DEFAULT_BRANCH"; then
+              exit 0
+            fi
+            echo "push raced, retrying ($i)…"
+          done
+          echo "push still failing after retries" >&2
+          exit 1
