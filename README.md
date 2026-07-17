@@ -6,7 +6,7 @@ A contribution summary widget. Refreshed daily by GitHub Actions.
 <img src="assets/widget.svg" alt="Profile widget demo" width="100%"/>
 </a>
 
-Private repos are not included. merged PR data is explicitly scoped to public repositories (`is:public`), so a local token and the Actions token produce identical output.
+Private repos are not included. merged PR data is explicitly scoped to public repositories (`is:public`).
 
 ---
 
