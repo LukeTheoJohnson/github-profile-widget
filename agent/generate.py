@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import calendar
 import json
-import math
 import os
 import sys
 import urllib.error
@@ -247,29 +246,22 @@ def commit_days(repo: str, days: int = HEAT_DAYS) -> list[int]:
 
 
 # ── my own public projects (non-fork repos I push to) ────────────────────────
-def collect_projects(limit: int = PROJECT_LIMIT):
-    """Returns (projects, lang_mix): the freshest `limit` own projects to draw,
-    and the primary-language distribution across ALL my public non-fork repos
-    (count per language, commonest first) for the header language ring."""
+def collect_projects(limit: int = PROJECT_LIMIT) -> list[dict]:
     try:
         repos = gh(f"/users/{USER}/repos?sort=pushed&per_page=100")
     except (urllib.error.URLError, urllib.error.HTTPError) as e:
         print(f"warn: repos fetch failed ({e})", file=sys.stderr)
-        return [], []
+        return []
     out = []
-    lang_counts: dict[str, int] = defaultdict(int)
     for r in repos:
         if r.get("fork") or r.get("archived"):
             continue
         if r.get("name", "").lower() == USER.lower():
             continue  # the profile repo itself is not a project
-        lang = r.get("language") or ""
-        if lang:
-            lang_counts[lang] += 1
         out.append(
             {
                 "name": r["name"],
-                "language": lang,
+                "language": r.get("language") or "",
                 "stars": r.get("stargazers_count", 0),
                 "description": (r.get("description") or "").strip(),
                 "pushed_at": r.get("pushed_at", ""),
@@ -280,8 +272,7 @@ def collect_projects(limit: int = PROJECT_LIMIT):
     for pr in out:  # only fetch commit history for the few we'll actually draw
         pr["heat"] = commit_days(pr["name"])
         pr["commits"] = sum(pr["heat"])
-    lang_mix = sorted(lang_counts.items(), key=lambda kv: kv[1], reverse=True)
-    return out, lang_mix
+    return out
 
 
 # ── my merged contributions (PRs that actually landed, grouped by repo) ───────
@@ -446,38 +437,7 @@ def _lang_mark(lang: str, x: int, y: int, size: int = 14):
     return ("", x)
 
 
-def _lang_donut(mix, cx, cy, r, th):
-    """Language fingerprint ring — linguist-coloured arcs over the top languages
-    (the rest folded into a themed 'Other' slice). Uses the fixed linguist hues,
-    like the per-project language dots, so it reads the same in both themes."""
-    top = mix[:4]
-    other = sum(n for _, n in mix[4:])
-    segs = list(top) + ([("Other", other)] if other else [])
-    total = sum(n for _, n in segs) or 1
-
-    def stroke_attr(lang):
-        colour = LANG_COLOURS.get(lang)
-        return f'stroke="{colour}"' if colour else f'class="{S_MUTED}"'
-
-    if len(segs) == 1:  # a single language reads as a full ring
-        return (f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" '
-                f'{stroke_attr(segs[0][0])} stroke-width="{th}"/>')
-    out, start = [], -90.0
-    for lang, n in segs:
-        end = start + n / total * 360
-        a0, a1 = math.radians(start), math.radians(end)
-        x0, y0 = cx + r * math.cos(a0), cy + r * math.sin(a0)
-        x1, y1 = cx + r * math.cos(a1), cy + r * math.sin(a1)
-        large = 1 if end - start > 180 else 0
-        out.append(
-            f'<path d="M{x0:.1f},{y0:.1f} A{r},{r} 0 {large} 1 {x1:.1f},{y1:.1f}" '
-            f'fill="none" {stroke_attr(lang)} stroke-width="{th}"/>'
-        )
-        start = end
-    return "".join(out)
-
-
-def render_svg(projects: list[dict], c: dict, languages: list) -> str:
+def render_svg(projects: list[dict], c: dict) -> str:
     W = 900
     cx, cw = 32, 410
     sq, gap = 9, 2
@@ -544,23 +504,6 @@ def render_svg(projects: list[dict], c: dict, languages: list) -> str:
         f'<text x="{W-32}" y="76" class="{C_MUTED}" font-size="15" '
         f'text-anchor="end">{today}</text>'
     )
-
-    # language fingerprint ring, top-right corner — the shape of my toolchain,
-    # with a compact legend of the top three languages to its left
-    if languages:
-        p.append(_lang_donut(languages, 840, 46, 16, 6))
-        total = sum(n for _, n in languages) or 1
-        ly = 38
-        for lang, n in languages[:3]:
-            colour = LANG_COLOURS.get(lang)
-            dot = f'fill="{colour}"' if colour else f'class="{C_MUTED}"'
-            p.append(f'<circle cx="810" cy="{ly-3}" r="3.5" {dot}/>')
-            p.append(
-                f'<text x="804" y="{ly}" class="{C_FG}" font-size="9.5" '
-                f'text-anchor="end">{escape(t(lang, 11))} '
-                f'<tspan class="{C_MUTED}">{round(n / total * 100)}%</tspan></text>'
-            )
-            ly += 12
 
     # key-insight caption — a generated finding, not a totals summary. The
     # eyebrow + coloured numerals read as one curated statement about the core
@@ -799,9 +742,9 @@ def render_svg(projects: list[dict], c: dict, languages: list) -> str:
 
 
 def main():
-    projects, languages = collect_projects()
+    projects = collect_projects()
     contrib = collect_contributions()
-    svg = render_svg(projects, contrib, languages)
+    svg = render_svg(projects, contrib)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(svg, encoding="utf-8")
     print(
