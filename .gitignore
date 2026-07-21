@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# local render / preview scratch
+assets/_live*.png
+_preview/
+_themetest/
