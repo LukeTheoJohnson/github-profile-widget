@@ -4,13 +4,9 @@
 Reads real data from the GitHub API and renders a clean data-viz card — no
 agent theater, no synthetic loading traces. It leads with completed work:
 
-  left   a "currently shipping" spotlight on my most-active repo (latest commit
-         + a live pulse), then my public projects — language, stars and a
-         commit-activity heatmap
+  left   my own public projects — language, stars and a commit-activity heatmap
   right  merged pull requests grouped by the upstream project they landed in,
-         and — when a token is present — a 52-week contribution wall (the year
-         of shipping); unauthenticated runs fall back to a 12-month merged-PR
-         cadence sparkline
+         plus a 12-month merged-PR cadence sparkline
 
 The card ships two deliberately-designed palettes — Tokyo Night (dark) and a
 Tokyo Day sibling (light) — and swaps between them with a
@@ -18,9 +14,8 @@ Tokyo Day sibling (light) — and swaps between them with a
 into either GitHub theme with no extra request.
 
 Entrance motion is CSS inside the SVG (bars grow, heatmap cells sweep in, the
-spark line draws once; the spotlight and today's active cell pulse) and is
-gated behind prefers-reduced-motion, so reduced-motion viewers get the static
-final state.
+spark line draws once; today's active cell pulses) and is gated behind
+prefers-reduced-motion, so reduced-motion viewers get the static final state.
 
 Two timeframes are in play and both are labelled on the card: pull-request
 totals cover the last year; the per-project commit heatmaps cover the last
@@ -35,9 +30,8 @@ whatever those allow.
 Deterministic, so it runs without any API key and its output is reproducible.
 Merged-PR data is scoped to public repos explicitly (is:public) and paginated,
 so private work never leaks regardless of which token runs it — a local PAT
-and the GitHub Actions token produce the same card. The contribution wall uses
-the GraphQL contributions calendar (public counts only), which needs a token;
-without one the card cleanly falls back to the merged-PR sparkline.
+and the GitHub Actions token produce the same card; private commit volume
+already surfaces via the stats card.
 
 Output: assets/widget.svg
 """
@@ -109,7 +103,7 @@ LIGHT_VARS = {
 # <style> block, so an element just carries the class and follows the theme.
 C_FG, C_MUTED, C_CYAN = "t-fg", "t-mut", "t-cyan"
 C_GREEN, C_BLUE, C_PURPLE, C_ORANGE = "t-green", "t-blue", "t-purple", "t-orange"
-C_PANEL, C_PANEL2 = "t-panel", "t-panel2"
+C_PANEL = "t-panel"
 S_MUTED, S_GREEN = "s-mut", "s-green"
 
 # GitHub linguist colours for the per-project language dot. The full map is
@@ -171,23 +165,6 @@ def gh(path: str):
         return json.load(r)
 
 
-def gh_graphql(query: str, variables: dict):
-    """POST a GraphQL query (needs a token). Used for the contribution wall."""
-    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.github.com/graphql",
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "oss-profile-widget",
-            "Authorization": f"Bearer {GH_TOKEN}",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r)
-
-
 def search_count(q: str) -> int:
     try:
         return int(gh(f"/search/issues?q={q}&per_page=1").get("total_count", 0))
@@ -243,21 +220,6 @@ def rel_age(iso: str) -> str:
     return f"updated {days // 30}mo ago"
 
 
-def short_age(iso: str) -> str:
-    """Compact '3h ago' / '2d ago' from an ISO timestamp (for the spotlight)."""
-    try:
-        d = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        return ""
-    secs = (datetime.now(timezone.utc) - d).total_seconds()
-    if secs < 3600:
-        return f"{max(int(secs // 60), 1)}m ago"
-    if secs < 86400:
-        return f"{int(secs // 3600)}h ago"
-    days = int(secs // 86400)
-    return f"{days}d ago" if days < 30 else f"{days // 30}mo ago"
-
-
 def commit_days(repo: str, days: int = HEAT_DAYS) -> list[int]:
     """Commits per day on the default branch, oldest→newest, last `days`."""
     now = datetime.now(timezone.utc)
@@ -281,23 +243,6 @@ def commit_days(repo: str, days: int = HEAT_DAYS) -> list[int]:
         if 0 <= day < days:
             counts[days - 1 - day] += 1  # newest on the right
     return counts
-
-
-def latest_commit(repo: str) -> dict:
-    """Newest commit's first message line + a compact age, for the spotlight."""
-    try:
-        commits = gh(f"/repos/{USER}/{repo}/commits?per_page=1")
-    except (urllib.error.URLError, urllib.error.HTTPError) as e:
-        print(f"warn: latest commit fetch failed for {repo} ({e})", file=sys.stderr)
-        return {}
-    if not commits:
-        return {}
-    info = commits[0].get("commit", {})
-    msg = (info.get("message") or "").split("\n", 1)[0].strip()
-    date = (info.get("author") or {}).get("date") or (
-        info.get("committer") or {}
-    ).get("date")
-    return {"message": msg, "age": short_age(date or "")}
 
 
 # ── my own public projects (non-fork repos I push to) ────────────────────────
@@ -410,51 +355,6 @@ def collect_contributions() -> dict:
     }
 
 
-# ── a year of shipping: the GraphQL contribution calendar (needs a token) ─────
-def collect_contribution_wall() -> dict | None:
-    """52-week × 7-day commit calendar for USER, or None when unavailable.
-
-    Uses the GraphQL contributionsCollection, which requires a token. The
-    counts are the public contribution totals GitHub itself shows on a profile
-    (the query runs as whatever token is present — the Actions bot or a PAT —
-    and unauthenticated viewers of another user only ever see public counts).
-    Returns {"weeks": [{"counts": [7 ints, Sun→Sat], "month": int}], "total"}.
-    """
-    if not GH_TOKEN:
-        return None
-    query = (
-        "query($login:String!){user(login:$login){contributionsCollection{"
-        "contributionCalendar{totalContributions weeks{contributionDays{"
-        "contributionCount date weekday}}}}}}"
-    )
-    try:
-        data = gh_graphql(query, {"login": USER})
-    except (urllib.error.URLError, urllib.error.HTTPError, ValueError) as e:
-        print(f"warn: contribution wall fetch failed ({e})", file=sys.stderr)
-        return None
-    cal = (
-        (((data or {}).get("data") or {}).get("user") or {})
-        .get("contributionsCollection", {})
-        .get("contributionCalendar")
-    )
-    if not cal:
-        return None
-    weeks = []
-    for w in cal.get("weeks", []):
-        counts = [0] * 7
-        first = None
-        for day in w.get("contributionDays", []):
-            wd = day.get("weekday", 0)
-            if 0 <= wd < 7:
-                counts[wd] = day.get("contributionCount", 0)
-            dt = day.get("date")
-            if dt and (first is None or dt < first):
-                first = dt
-        month = int(first[5:7]) if first else 1
-        weeks.append({"counts": counts, "month": month})
-    return {"weeks": weeks, "total": cal.get("totalContributions", 0)}
-
-
 # ── render ───────────────────────────────────────────────────────────────────
 def t(s: str, n: int) -> str:
     s = str(s)
@@ -471,19 +371,6 @@ def heat_color(n: int) -> str:
     if n <= 3:
         return "h2"
     if n <= 6:
-        return "h3"
-    return "h4"
-
-
-def wall_color(n: int) -> str:
-    """Ramp class for a day in the year wall (denser than the 14-day strips)."""
-    if n <= 0:
-        return "h0"
-    if n <= 2:
-        return "h1"
-    if n <= 4:
-        return "h2"
-    if n <= 8:
         return "h3"
     return "h4"
 
@@ -550,48 +437,27 @@ def _lang_mark(lang: str, x: int, y: int, size: int = 14):
     return ("", x)
 
 
-def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
-               wall: dict | None) -> str:
+def render_svg(projects: list[dict], c: dict) -> str:
     W = 900
     cx, cw = 32, 410
     sq, gap = 9, 2
     strip_w = HEAT_DAYS * (sq + gap) - gap
     card_h, pitch = 46, 54  # each project card, and the row-to-row pitch
 
-    # ── left column vertical plan: a spotlight hero, then the project list ────
-    hero_eyebrow_y = 172
-    hero_y, hero_h = 182, 58
-    hero_bottom = hero_y + hero_h
-    left_label_y = hero_bottom + 24  # "PROJECTS I'M WORKING ON"
-    cards_start = left_label_y + 14
-
+    # pre-measure so the total height hugs the content. Each card is two rows:
+    # the language mark + name (with the heatmap opposite), then a description
+    # line with the commit count opposite it.
     for pr in projects:
         pr["desc_line"] = t(pr["description"] or rel_age(pr["pushed_at"]), 44)
 
-    if projects:
-        left_bottom = cards_start + (len(projects) * pitch - 8)
-    else:
-        left_bottom = 210
-
-    # ── right column: merged-PR bars, then the wall (or spark fallback) ──────
+    left_bottom = 188 + (len(projects) * pitch - 8 if projects else 22)
     bars_end = 198 + (len(c["bars"]) * 30 if c["bars"] else 22)
-    has_wall = bool(wall and wall.get("weeks"))
     has_spark = max(c["monthly"]) > 0  # all-zero months: skip the flatline chart
-
-    wall_cell = 7  # px per day-column / row in the year wall
-    if has_wall:
-        wall_label_y = bars_end + 16
-        wall_top = wall_label_y + 9
-        wall_grid_h = 7 * wall_cell
-        right_bottom = wall_top + wall_grid_h + 16
-    elif has_spark:
-        spark_label_y = bars_end + 10
-        spark_top = spark_label_y + 10
-        spark_h = 36
-        right_bottom = spark_top + spark_h + 18
-    else:
-        right_bottom = bars_end
-
+    spark_label_y = bars_end + 10
+    spark_top = spark_label_y + 10
+    spark_h = 36
+    # sparkline height includes room for the x-axis month labels
+    right_bottom = (spark_top + spark_h + 18) if has_spark else bars_end
     H = max(left_bottom, right_bottom) + 58
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -695,58 +561,16 @@ def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
         f'class="{S_MUTED}" stroke-opacity="0.25"/>'
     )
 
-    # ── left, top: the "currently shipping" spotlight ────────────────────────
-    if spotlight:
-        p.append(
-            f'<text x="32" y="{hero_eyebrow_y}" class="{C_CYAN}" font-size="11.5" '
-            f'letter-spacing="1.5">CURRENTLY SHIPPING</text>'
-        )
-        p.append(
-            f'<rect x="{cx}" y="{hero_y}" width="{cw}" height="{hero_h}" rx="12" '
-            f'class="{C_PANEL2}"/>'
-        )
-        # green accent border (separate rect so the panel fill keeps its class)
-        p.append(
-            f'<rect x="{cx}" y="{hero_y}" width="{cw}" height="{hero_h}" rx="12" '
-            f'fill="none" class="{S_GREEN}" stroke-opacity="0.5"/>'
-        )
-        mark, name_x = _lang_mark(spotlight.get("language", ""), cx + 16, hero_y + 13, 15)
-        p.append(mark)
-        p.append(
-            f'<text x="{name_x}" y="{hero_y + 24}" class="{C_FG}" font-size="17" '
-            f'font-weight="700">{escape(t(spotlight["name"], 22))}</text>'
-        )
-        # live pulse + label, only when the repo actually moved this fortnight
-        if spotlight.get("commits", 0) > 0:
-            p.append(
-                f'<circle cx="{cx + cw - 96}" cy="{hero_y + 19}" r="4" '
-                f'class="{C_GREEN} pulse"/>'
-            )
-            p.append(
-                f'<text x="{cx + cw - 86}" y="{hero_y + 23}" class="{C_GREEN}" '
-                f'font-size="11" font-weight="600">shipping now</text>'
-            )
-        # latest commit message, full-width on the second row (the same repo's
-        # 14-day heatmap shows in the list below, so the hero skips its own)
-        msg = spotlight.get("commit_msg") or spotlight.get("description") or ""
-        age = spotlight.get("commit_age") or ""
-        tail = f'  ·  {age}' if age else ""
-        line = (t(msg, 44) + tail) if msg else t(spotlight.get("description", ""), 52)
-        p.append(
-            f'<text x="{cx + 16}" y="{hero_y + 45}" class="{C_MUTED}" '
-            f'font-size="12.5">↳ {escape(line)}</text>'
-        )
-
     # ── left: my own projects (cards with commit heatmap) ────────────────────
     p.append(
-        f'<text x="32" y="{left_label_y}" class="{C_CYAN}" font-size="11.5" '
+        f'<text x="32" y="174" class="{C_CYAN}" font-size="11.5" '
         f'letter-spacing="1.5">PROJECTS I&apos;M WORKING ON</text>'
     )
     p.append(
-        f'<text x="442" y="{left_label_y}" class="{C_MUTED}" font-size="10" '
+        f'<text x="442" y="174" class="{C_MUTED}" font-size="10" '
         f'text-anchor="end" letter-spacing="0.5">commits / {HEAT_DAYS}d</text>'
     )
-    cy = cards_start
+    cy = 188
     if projects:
         for pr in projects:
             p.append(
@@ -833,43 +657,10 @@ def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
         )
         by += 30
 
-    # ── right, bottom: a year of shipping (52-week wall), or the PR sparkline ─
-    if has_wall:
-        weeks = wall["weeks"][-52:]
-        p.append(
-            f'<text x="{bx}" y="{wall_label_y}" class="{C_GREEN}" font-size="11.5" '
-            f'letter-spacing="1.5">A YEAR OF SHIPPING</text>'
-        )
-        p.append(
-            f'<text x="{W-32}" y="{wall_label_y}" class="{C_MUTED}" font-size="10" '
-            f'text-anchor="end">{wall.get("total", 0):,} contributions</text>'
-        )
-        csz = wall_cell - 1.2  # cell draw size, leaving a hairline gutter
-        for wi, wk in enumerate(weeks):
-            gx = bx + wi * wall_cell
-            for d in range(7):
-                n = wk["counts"][d]
-                delay = min(0.1 + wi * 0.012, 0.75)
-                p.append(
-                    f'<rect x="{gx:.0f}" y="{wall_top + d*wall_cell}" '
-                    f'width="{csz:.1f}" height="{csz:.1f}" rx="1.3" '
-                    f'class="{wall_color(n)} cell" '
-                    f'style="animation-delay:{delay:.2f}s"/>'
-                )
-        # month ticks along the bottom, spaced so they never crowd
-        label_y = wall_top + 7 * wall_cell + 10
-        prev_m, last_x = None, -999
-        for wi, wk in enumerate(weeks):
-            gx = bx + wi * wall_cell
-            if wk["month"] != prev_m and gx - last_x > 26:
-                p.append(
-                    f'<text x="{gx:.0f}" y="{label_y}" class="{C_MUTED}" '
-                    f'font-size="9">{calendar.month_abbr[wk["month"]]}</text>'
-                )
-                last_x = gx
-            prev_m = wk["month"]
-    elif has_spark:
-        monthly = c["monthly"]
+    # ── merged-PR cadence, last 12 months (area sparkline with light axes);
+    # skipped entirely when the year is all zeros — no flatline chart ────────
+    monthly = c["monthly"]
+    if has_spark:
         p.append(
             f'<text x="{bx}" y="{spark_label_y}" class="{C_MUTED}" font-size="10" '
             f'letter-spacing="1">MERGED PRs / MONTH</text>'
@@ -884,6 +675,8 @@ def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
         ]
         line = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
 
+        # y-gridlines behind the area: a zero baseline, and a dashed peak
+        # line — each labelled in the gutter just left of the plot
         grid = [
             (base, "0", ""),
             (spark_top, str(speak), ' stroke-dasharray="3 3"'),
@@ -911,6 +704,7 @@ def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
             f'class="{C_GREEN} dot"/>'
         )
 
+        # x-axis: month labels at the start, middle and end of the window
         now_m = datetime.now(timezone.utc)
 
         def _mlabel(idx: int, with_year: bool = False) -> str:
@@ -920,6 +714,8 @@ def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
             lab = calendar.month_abbr[m]
             return f"{lab} ’{y % 100:02d}" if with_year else lab
 
+        # only the two ends carry a 2-digit year, so the span's year boundary is
+        # legible without cluttering the axis; the midpoint stays a bare month
         axis_y = base + 13
         for idx, anchor, yr in ((0, "start", True),
                                 (len(monthly) // 2, "middle", False),
@@ -929,8 +725,7 @@ def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
                 f'font-size="9" text-anchor="{anchor}">{_mlabel(idx, yr)}</text>'
             )
 
-    # ── provenance, with the timeframes spelled out ──────────────────────────
-    wall_note = "commit wall: last year · " if has_wall else ""
+    # ── provenance, with both timeframes spelled out ─────────────────────────
     p.append(
         f'<line x1="32" y1="{H-32}" x2="{W-32}" y2="{H-32}" '
         f'class="{S_MUTED}" stroke-opacity="0.25"/>'
@@ -938,39 +733,24 @@ def render_svg(projects: list[dict], c: dict, spotlight: dict | None,
     p.append(
         f'<text x="32" y="{H-14}" class="{C_MUTED}" font-size="11">'
         f'pull requests: last year ({c["total_prs"]} analysed) · '
-        f'{wall_note}commit heatmaps: last {HEAT_DAYS} days · '
-        f'GitHub API · refreshed daily</text>'
+        f'commit heatmaps: last {HEAT_DAYS} days · GitHub API · refreshed daily'
+        f'</text>'
     )
 
     p.append("</svg>")
     return "".join(p)
 
 
-def choose_spotlight(projects: list[dict]) -> dict | None:
-    """The repo to feature: most commits in the last fortnight, ties broken by
-    recency (the list is already newest-pushed first). Enriched with its latest
-    commit message so the hero can show what just shipped."""
-    if not projects:
-        return None
-    top = max(projects, key=lambda pr: pr.get("commits", 0))
-    lc = latest_commit(top["name"])
-    return {**top, "commit_msg": lc.get("message", ""), "commit_age": lc.get("age", "")}
-
-
 def main():
     projects = collect_projects()
     contrib = collect_contributions()
-    spotlight = choose_spotlight(projects)
-    wall = collect_contribution_wall()
-    svg = render_svg(projects, contrib, spotlight, wall)
+    svg = render_svg(projects, contrib)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(svg, encoding="utf-8")
     print(
         f"wrote {OUT} ({len(svg)} bytes) · "
         f"{len(projects)} projects / {contrib['merged']} merged / "
-        f"{len(contrib['bars'])} bars · "
-        f"spotlight={spotlight['name'] if spotlight else 'none'} · "
-        f"wall={'yes' if (wall and wall.get('weeks')) else 'no (spark fallback)'}"
+        f"{len(contrib['bars'])} bars"
     )
 
 
