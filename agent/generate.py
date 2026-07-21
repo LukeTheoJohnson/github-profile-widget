@@ -6,7 +6,10 @@ agent theater, no synthetic loading traces. It leads with completed work:
 
   left   my own public projects — language, stars and a commit-activity heatmap
   right  merged pull requests grouped by the upstream project they landed in,
-         plus a 12-month merged-PR cadence sparkline
+         plus a "scope cloud" of the areas of others' codebases I've shipped
+         into — parsed from conventional-commit PR titles, with the ones I
+         fixed more than once accented. A 12-month merged-PR cadence sparkline
+         is the fallback when no scopes are available
 
 The card ships two deliberately-designed palettes — Tokyo Night (dark) and a
 Tokyo Day sibling (light) — and swaps between them with a
@@ -41,6 +44,7 @@ from __future__ import annotations
 import calendar
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -343,6 +347,22 @@ def collect_contributions() -> dict:
         if 0 <= mb < 12:
             monthly[11 - mb] += 1
 
+    # conventional-commit scopes from merged EXTERNAL PR titles — the areas of
+    # other people's codebases I've shipped into (drives the scope cloud). Reads
+    # the titles we already fetched, so it costs no extra API call.
+    scope_counts: dict[str, int] = defaultdict(int)
+    for it in items:
+        if not it.get("pull_request", {}).get("merged_at"):
+            continue
+        full = it.get("repository_url", "").split("/repos/", 1)[-1]
+        owner = full.split("/", 1)[0] if "/" in full else ""
+        if not owner or owner.lower() == USER.lower():
+            continue  # external repos only
+        m = re.match(r"[a-zA-Z]+(?:\(([^)]+)\))?\s*:", it.get("title", "").strip())
+        if m and m.group(1):
+            scope_counts[m.group(1).strip().lower()] += 1
+    scopes = sorted(scope_counts.items(), key=lambda kv: kv[1], reverse=True)[:16]
+
     return {
         "monthly": monthly,
         "merged": merged,
@@ -351,6 +371,7 @@ def collect_contributions() -> dict:
         "core_contributions": core_contributions,
         "core_projects": core_projects,
         "bars": bars,
+        "scopes": scopes,
         "total_prs": len(items),
     }
 
@@ -437,6 +458,32 @@ def _lang_mark(lang: str, x: int, y: int, size: int = 14):
     return ("", x)
 
 
+def _scope_cloud(scopes: list, x0: int, y0: int, maxw: int):
+    """Flow the conventional-commit scopes as chips. Scopes I shipped into more
+    than once get a green accent + count, singletons recede — so the cloud reads
+    breadth (how many areas) and depth (which I revisited), not a flat count.
+    Returns (markup, bottom_y)."""
+    p, x, y, rh, fs = [], x0, y0, 27, 12.5
+    for label, n in scopes:
+        lab = t(label, 15)
+        cw = len(lab) * fs * 0.56 + (30 if n > 1 else 20)
+        if x + cw > x0 + maxw:
+            x, y = x0, y + rh
+        rep = n > 1
+        fill = C_GREEN if rep else "t-panel2"
+        op = ' opacity="0.16"' if rep else ""
+        p.append(f'<rect x="{x:.0f}" y="{y-15}" width="{cw:.0f}" height="22" rx="11" '
+                 f'class="{fill}"{op}/>')
+        fw = ' font-weight="600"' if rep else ""
+        p.append(f'<text x="{x+11:.0f}" y="{y+1}" class="{C_GREEN if rep else C_FG}" '
+                 f'font-size="{fs}"{fw}>{escape(lab)}</text>')
+        if rep:
+            p.append(f'<text x="{x+cw-9:.0f}" y="{y+1}" class="{C_GREEN}" '
+                     f'font-size="9.5" text-anchor="end" opacity="0.85">{n}</text>')
+        x += cw + 7
+    return "".join(p), y + 8
+
+
 def render_svg(projects: list[dict], c: dict) -> str:
     W = 900
     cx, cw = 32, 410
@@ -452,12 +499,26 @@ def render_svg(projects: list[dict], c: dict) -> str:
 
     left_bottom = 188 + (len(projects) * pitch - 8 if projects else 22)
     bars_end = 198 + (len(c["bars"]) * 30 if c["bars"] else 22)
-    has_spark = max(c["monthly"]) > 0  # all-zero months: skip the flatline chart
-    spark_label_y = bars_end + 10
-    spark_top = spark_label_y + 10
-    spark_h = 36
-    # sparkline height includes room for the x-axis month labels
-    right_bottom = (spark_top + spark_h + 18) if has_spark else bars_end
+    bx = 470  # right-column x-origin (bars, and the scope cloud beneath them)
+
+    # right column bottom: the scope cloud is primary; the 12-month sparkline is
+    # the fallback for when no conventional-commit scopes are available.
+    scopes = c.get("scopes") or []
+    cloud_svg, cloud_label_y = "", 0
+    if scopes:
+        cloud_label_y = bars_end + 18
+        cloud_svg, cloud_bottom = _scope_cloud(
+            scopes, bx, cloud_label_y + 24, W - 32 - bx
+        )
+        right_bottom = cloud_bottom + 6
+        has_spark = False
+    else:
+        has_spark = max(c["monthly"]) > 0  # all-zero months: skip the flatline
+        spark_label_y = bars_end + 10
+        spark_top = spark_label_y + 10
+        spark_h = 36
+        # sparkline height includes room for the x-axis month labels
+        right_bottom = (spark_top + spark_h + 18) if has_spark else bars_end
     H = max(left_bottom, right_bottom) + 58
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -657,10 +718,21 @@ def render_svg(projects: list[dict], c: dict) -> str:
         )
         by += 30
 
-    # ── merged-PR cadence, last 12 months (area sparkline with light axes);
-    # skipped entirely when the year is all zeros — no flatline chart ────────
-    monthly = c["monthly"]
-    if has_spark:
+    # ── right, bottom: the scope cloud — the areas of other people's codebases
+    # I've shipped into — or the 12-month merged-PR sparkline as a fallback ───
+    if scopes:
+        n_rev = sum(1 for _lab, n in scopes if n > 1)
+        p.append(
+            f'<text x="{bx}" y="{cloud_label_y}" class="{C_CYAN}" font-size="11.5" '
+            f'letter-spacing="1.5">AREAS I&apos;VE HARDENED UPSTREAM</text>'
+        )
+        p.append(
+            f'<text x="{W-32}" y="{cloud_label_y}" class="{C_MUTED}" font-size="10" '
+            f'text-anchor="end">{len(scopes)} areas · {n_rev} revisited</text>'
+        )
+        p.append(cloud_svg)
+    elif has_spark:
+        monthly = c["monthly"]
         p.append(
             f'<text x="{bx}" y="{spark_label_y}" class="{C_MUTED}" font-size="10" '
             f'letter-spacing="1">MERGED PRs / MONTH</text>'
