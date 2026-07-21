@@ -1,10 +1,11 @@
 # github-profile-widget
 
-A contribution summary widget. Refreshed daily by GitHub Actions.
 
 <a href="https://github.com/LukeTheoJohnson?tab=repositories">
 <img src="assets/widget.svg" alt="Profile widget demo" width="100%"/>
 </a>
+
+A contribution summary widget. Refreshed daily by GitHub Actions.
 
 Private repos are not included. merged PR data is explicitly scoped to public repositories (`is:public`).
 
@@ -42,5 +43,5 @@ Your GitHub username is detected automatically from the Actions environment — 
 
 - Zero dependencies — pure Python standard library (`urllib`, `json`, `pathlib`)
 - No API keys or secrets required — uses the built-in `GITHUB_TOKEN` provided by Actions
-- Generates a single self-contained SVG with CSS entrance animations gated behind `prefers-reduced-motion`
-- The workflow handles push races (another commit landing between checkout and push) with a fetch-reset-retry loop
+- Generates a single SVG with CSS entrance animations gated behind `prefers-reduced-motion`
+- The workflow handles push races with a fetch-reset-retry loop
