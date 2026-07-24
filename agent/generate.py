@@ -22,10 +22,13 @@ totals cover the last year; the per-project commit heatmaps cover the last
 14 days.
 
 Identity is env-configurable — WIDGET_USER (defaults to the repo owner when
-run in GitHub Actions), WIDGET_NAME and WIDGET_TAGLINE — so a fork works
-without code edits. Row counts are too: WIDGET_PROJECT_LIMIT and
-WIDGET_BAR_LIMIT cap the two columns, and the card height stretches to fit
-whatever those allow.
+run in GitHub Actions) and WIDGET_NAME — so a fork works without code edits.
+The top-right tagline auto-derives from the reviewed data (see derive_tagline):
+a couple of uppercase domain keywords mined from the projects and upstream repos
+on the card, so a fork gets a fitting strip with nothing to set. WIDGET_TAGLINE
+overrides it with a literal string, or hides it when set to empty. Row counts
+are configurable too: WIDGET_PROJECT_LIMIT and WIDGET_BAR_LIMIT cap the two
+columns, and the card height stretches to fit whatever those allow.
 
 Deterministic, so it runs without any API key and its output is reproducible.
 Merged-PR data is scoped to public repos explicitly (is:public) and paginated,
@@ -55,7 +58,9 @@ USER = (
     or "LukeTheoJohnson"
 )
 NAME = os.environ.get("WIDGET_NAME") or USER
-TAGLINE = os.environ.get("WIDGET_TAGLINE", "")
+# Unset → auto-derived from the reviewed data (derive_tagline); an explicit
+# empty string hides the strip; any other value is used verbatim.
+TAGLINE_ENV = os.environ.get("WIDGET_TAGLINE")
 GH_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
 OUT = Path(__file__).resolve().parent.parent / "assets" / "widget.svg"
 
@@ -74,6 +79,7 @@ def _env_int(name: str, default: int) -> int:
 PROJECT_LIMIT = _env_int("WIDGET_PROJECT_LIMIT", 6)  # own-project cards drawn
 BAR_LIMIT = _env_int("WIDGET_BAR_LIMIT", 6)  # merged-PR repo bars drawn
 CORE_STARS = _env_int("WIDGET_CORE_STARS", 10_000)  # star floor for a "core" project
+TAGLINE_MAX = _env_int("WIDGET_TAGLINE_KEYWORDS", 2)  # keywords in the auto tagline
 
 # ── theming ──────────────────────────────────────────────────────────────────
 # Colours are applied through CSS custom properties + utility classes, never
@@ -355,6 +361,78 @@ def collect_contributions() -> dict:
     }
 
 
+# ── auto-derived tagline ─────────────────────────────────────────────────────
+# The header's top-right strip (the old "data science · agentic engineering"
+# tagline) is regenerated from the data the card already reviewed rather than
+# hand-set: the names, descriptions and languages of my own projects plus the
+# upstream repos I landed PRs in, scored against a small curated lexicon of
+# domain labels. Deterministic and offline like the rest of the card — the same
+# repos always yield the same keywords. Short, ambiguous triggers are space-
+# padded (" ml ", " api ") so they only match on word boundaries, not inside
+# unrelated words. WIDGET_TAGLINE overrides it; an empty WIDGET_TAGLINE hides it.
+TAGLINE_LEXICON = [
+    ("AGENTIC ENGINEERING",
+     (" agent", "agentic", " mcp", "autonomous", "orchestrat", " swarm")),
+    ("LLM SYSTEMS",
+     (" llm", "claude", " gpt", "openai", "anthropic", "prompt", " rag",
+      "gemma", "ollama", " ai ")),
+    ("DATA SCIENCE",
+     (" data", "pandas", "numpy", "dataframe", "analytic", "analysis",
+      "dataset", "jupyter", "notebook", "plotly")),
+    ("MACHINE LEARNING",
+     ("machine learning", "pytorch", "tensorflow", "sklearn", "scikit",
+      "neural", "embedding", " ml ")),
+    ("AUTOMATION",
+     ("automat", "pipeline", " workflow", " bot ", " cron", "scheduler",
+      " etl", "scrap")),
+    ("DEV TOOLING",
+     (" cli", " sdk", "devtool", "tooling", "framework", "compiler", "linter")),
+    ("WEB & APIs",
+     (" api ", "fastapi", "flask", "django", "backend", " server", " http",
+      " rest")),
+]
+
+
+def derive_tagline(projects: list[dict], c: dict, limit: int = TAGLINE_MAX) -> str:
+    """A short, uppercase keyword strip mined from the reviewed data.
+
+    Scores the curated lexicon against the text the card already collected —
+    own-project names/descriptions/languages and the upstream repos PRs landed
+    in — and returns the top `limit` labels joined with ` · `. On a tie the
+    lexicon's own order wins (stable sort), so stronger signals lead. Falls back
+    to the most common project language when nothing scores, so a fresh fork
+    still gets a sensible strip. Deterministic: same repos → same keywords.
+    """
+    parts: list[str] = []
+    langs: list[str] = []
+    for p in projects:
+        parts += [p.get("name", ""), p.get("description", ""), p.get("language", "")]
+        if p.get("language"):
+            langs.append(p["language"])
+    for b in c.get("bars", []):
+        parts += [b.get("name", ""), b.get("full", "")]
+
+    raw = " ".join(parts).lower()
+    for ch in "_-/.,:()[]":
+        raw = raw.replace(ch, " ")
+    corpus = " " + " ".join(raw.split()) + " "  # padded so boundary triggers match
+
+    scored = [
+        (sum(corpus.count(tk) for tk in triggers), label)
+        for label, triggers in TAGLINE_LEXICON
+    ]
+    scored = [pair for pair in scored if pair[0]]
+    scored.sort(key=lambda pair: pair[0], reverse=True)  # stable → ties keep order
+    keywords = [label for _, label in scored[:limit]]
+
+    if len(keywords) < limit and langs:
+        top_lang = max(sorted(set(langs)), key=langs.count).upper()
+        if top_lang not in keywords:
+            keywords.append(top_lang)
+
+    return " · ".join(keywords[:limit])
+
+
 # ── render ───────────────────────────────────────────────────────────────────
 def t(s: str, n: int) -> str:
     s = str(s)
@@ -437,7 +515,7 @@ def _lang_mark(lang: str, x: int, y: int, size: int = 14):
     return ("", x)
 
 
-def render_svg(projects: list[dict], c: dict) -> str:
+def render_svg(projects: list[dict], c: dict, tagline: str = "") -> str:
     W = 900
     cx, cw = 32, 410
     sq, gap = 9, 2
@@ -458,7 +536,7 @@ def render_svg(projects: list[dict], c: dict) -> str:
     spark_h = 36
     # sparkline height includes room for the x-axis month labels
     right_bottom = (spark_top + spark_h + 18) if has_spark else bars_end
-    H = max(left_bottom, right_bottom) + 58
+    H = max(left_bottom, right_bottom) + 30
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     p: list[str] = []
@@ -495,13 +573,13 @@ def render_svg(projects: list[dict], c: dict) -> str:
         f'<text x="32" y="50" class="{C_FG}" font-size="27" font-weight="700">'
         f'{escape(NAME)}</text>'
     )
-    if TAGLINE:
+    if tagline:
         p.append(
             f'<text x="{W-32}" y="44" class="{C_CYAN}" font-size="13" '
-            f'text-anchor="end" letter-spacing="2">{escape(TAGLINE)}</text>'
+            f'text-anchor="end" letter-spacing="2">{escape(t(tagline, 46))}</text>'
         )
     p.append(
-        f'<text x="{W-32}" y="76" class="{C_MUTED}" font-size="15" '
+        f'<text x="{W-32}" y="76" class="{C_MUTED}" font-size="19" '
         f'text-anchor="end">{today}</text>'
     )
 
@@ -511,10 +589,6 @@ def render_svg(projects: list[dict], c: dict) -> str:
     p.append(
         f'<text x="32" y="97" class="{C_CYAN}" font-size="11.5" '
         f'letter-spacing="1.5">✦ KEY INSIGHT</text>'
-    )
-    p.append(
-        f'<text x="{W-32}" y="97" class="{C_MUTED}" font-size="10.5" '
-        f'text-anchor="end" letter-spacing="1">LAST YEAR</text>'
     )
     # insight laid out as positioned runs so the merge/repo icons sit inline,
     # just left of their coloured numbers; textLength pins each text run's
@@ -725,18 +799,6 @@ def render_svg(projects: list[dict], c: dict) -> str:
                 f'font-size="9" text-anchor="{anchor}">{_mlabel(idx, yr)}</text>'
             )
 
-    # ── provenance, with both timeframes spelled out ─────────────────────────
-    p.append(
-        f'<line x1="32" y1="{H-32}" x2="{W-32}" y2="{H-32}" '
-        f'class="{S_MUTED}" stroke-opacity="0.25"/>'
-    )
-    p.append(
-        f'<text x="32" y="{H-14}" class="{C_MUTED}" font-size="11">'
-        f'pull requests: last year ({c["total_prs"]} analysed) · '
-        f'commit heatmaps: last {HEAT_DAYS} days · GitHub API · refreshed daily'
-        f'</text>'
-    )
-
     p.append("</svg>")
     return "".join(p)
 
@@ -744,13 +806,15 @@ def render_svg(projects: list[dict], c: dict) -> str:
 def main():
     projects = collect_projects()
     contrib = collect_contributions()
-    svg = render_svg(projects, contrib)
+    # unset → derive from the data; explicit value (incl. "") wins verbatim
+    tagline = derive_tagline(projects, contrib) if TAGLINE_ENV is None else TAGLINE_ENV
+    svg = render_svg(projects, contrib, tagline)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(svg, encoding="utf-8")
     print(
         f"wrote {OUT} ({len(svg)} bytes) · "
         f"{len(projects)} projects / {contrib['merged']} merged / "
-        f"{len(contrib['bars'])} bars"
+        f"{len(contrib['bars'])} bars · tagline: {tagline or '(none)'}"
     )
 
 
