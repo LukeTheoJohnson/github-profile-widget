@@ -21,9 +21,10 @@ Two timeframes are in play and both are labelled on the card: pull-request
 totals cover the last year; the per-project commit heatmaps cover the last
 14 days.
 
-Identity is env-configurable — WIDGET_USER (defaults to the repo owner when
-run in GitHub Actions) and WIDGET_NAME — so a fork works without code edits.
-The top-right tagline auto-derives from the reviewed data (see derive_tagline):
+Identity is env-configurable but needs nothing set: WIDGET_USER defaults to the
+repo owner when run in GitHub Actions, and the header name defaults to that
+account's GitHub display name ("Luke Johnson", not the login) — WIDGET_NAME
+overrides it. The top-right tagline auto-derives from the reviewed data (see derive_tagline):
 a couple of uppercase domain keywords mined from the projects and upstream repos
 on the card, so a fork gets a fitting strip with nothing to set. WIDGET_TAGLINE
 overrides it with a literal string, or hides it when set to empty. Row counts
@@ -57,7 +58,9 @@ USER = (
     or os.environ.get("GITHUB_REPOSITORY_OWNER")  # set by GitHub Actions
     or "LukeTheoJohnson"
 )
-NAME = os.environ.get("WIDGET_NAME") or USER
+# Unset → the account's GitHub display name (profile_name), e.g. "Luke Johnson",
+# not the login; any value overrides it.
+NAME_ENV = os.environ.get("WIDGET_NAME")
 # Unset → auto-derived from the reviewed data (derive_tagline); an explicit
 # empty string hides the strip; any other value is used verbatim.
 TAGLINE_ENV = os.environ.get("WIDGET_TAGLINE")
@@ -79,7 +82,7 @@ def _env_int(name: str, default: int) -> int:
 PROJECT_LIMIT = _env_int("WIDGET_PROJECT_LIMIT", 6)  # own-project cards drawn
 BAR_LIMIT = _env_int("WIDGET_BAR_LIMIT", 6)  # merged-PR repo bars drawn
 CORE_STARS = _env_int("WIDGET_CORE_STARS", 10_000)  # star floor for a "core" project
-TAGLINE_MAX = _env_int("WIDGET_TAGLINE_KEYWORDS", 2)  # keywords in the auto tagline
+TAGLINE_MAX = _env_int("WIDGET_TAGLINE_KEYWORDS", 3)  # keywords in the auto tagline
 
 # ── theming ──────────────────────────────────────────────────────────────────
 # Colours are applied through CSS custom properties + utility classes, never
@@ -199,6 +202,17 @@ def search_issues_all(q: str, cap_pages: int = 10) -> list[dict]:
         if len(batch) < 100:
             break
     return items
+
+
+def profile_name() -> str:
+    """The account's GitHub display name (the profile 'name' field), e.g.
+    'Luke Johnson', falling back to the login when it's unset. Keeps a fork's
+    header a real name with nothing to configure; WIDGET_NAME still overrides."""
+    try:
+        return (gh(f"/users/{USER}").get("name") or "").strip() or USER
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        print(f"warn: profile name fetch failed ({e})", file=sys.stderr)
+        return USER
 
 
 def repo_stars(full: str) -> int:
@@ -515,7 +529,7 @@ def _lang_mark(lang: str, x: int, y: int, size: int = 14):
     return ("", x)
 
 
-def render_svg(projects: list[dict], c: dict, tagline: str = "") -> str:
+def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "") -> str:
     W = 900
     cx, cw = 32, 410
     sq, gap = 9, 2
@@ -571,7 +585,7 @@ def render_svg(projects: list[dict], c: dict, tagline: str = "") -> str:
     # header
     p.append(
         f'<text x="32" y="50" class="{C_FG}" font-size="27" font-weight="700">'
-        f'{escape(NAME)}</text>'
+        f'{escape(name)}</text>'
     )
     if tagline:
         p.append(
@@ -806,9 +820,10 @@ def render_svg(projects: list[dict], c: dict, tagline: str = "") -> str:
 def main():
     projects = collect_projects()
     contrib = collect_contributions()
+    name = NAME_ENV or profile_name()  # display name, not the login, unless set
     # unset → derive from the data; explicit value (incl. "") wins verbatim
     tagline = derive_tagline(projects, contrib) if TAGLINE_ENV is None else TAGLINE_ENV
-    svg = render_svg(projects, contrib, tagline)
+    svg = render_svg(projects, contrib, name, tagline)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(svg, encoding="utf-8")
     print(
