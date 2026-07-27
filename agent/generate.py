@@ -542,6 +542,20 @@ def kfmt(n: int) -> str:
     return f"{n / 1000:.1f}k".replace(".0k", "k") if n >= 1000 else str(n)
 
 
+def nice_ticks(peak: int) -> tuple[int, list[int]]:
+    """A rounded axis ceiling >= peak plus evenly-spaced integer ticks up to it,
+    so the sparkline's y-axis reads in clean round numbers (0, 5, 10, 15, 20)
+    rather than a bare 0-and-peak pair. Aims for at most four intervals."""
+    if peak <= 0:
+        return 1, [0, 1]
+    step = 1
+    for step in (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000):
+        if peak / step <= 4:
+            break
+    top = -(-peak // step) * step  # ceil(peak / step) * step
+    return top, list(range(0, top + 1, step))
+
+
 def _style_block() -> str:
     """The <style>: theme variables + the light override + utility classes,
     then the one-shot entrance motion (gated behind prefers-reduced-motion)."""
@@ -609,7 +623,7 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
     has_spark = max(c["monthly"]) > 0  # all-zero months: skip the flatline chart
     spark_label_y = bars_end + 10
     spark_top = spark_label_y + 10
-    spark_h = 36
+    spark_h = 48
     # sparkline height includes room for the x-axis month labels
     right_bottom = (spark_top + spark_h + 18) if has_spark else bars_end
     H = max(left_bottom, right_bottom) + 30
@@ -670,7 +684,7 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
     # insight laid out as positioned runs so the merge/repo icons sit inline,
     # just left of their coloured numbers; textLength pins each text run's
     # advance so the icons stay aligned regardless of the renderer's metrics.
-    isz, ix, iy = 19, 32, 128
+    isz, ix, iy = 21, 32, 129
     thr = f'★ {kfmt(CORE_STARS)}+'
     if c["core_projects"]:
         runs = [
@@ -818,28 +832,30 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
         )
         sw = W - 32 - bx
         speak = max(monthly)
-        step = sw / (len(monthly) - 1)
+        # a rounded axis ceiling so the y-axis carries several round ticks
+        # (0, 5, 10, 15, 20) rather than a bare 0-and-peak pair
+        axis_top, ticks = nice_ticks(speak)
+        xstep = sw / (len(monthly) - 1)
         base = spark_top + spark_h
         pts = [
-            (bx + i * step, base - (v / speak) * spark_h)
+            (bx + i * xstep, base - (v / axis_top) * spark_h)
             for i, v in enumerate(monthly)
         ]
         line = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
 
-        # y-gridlines behind the area: a zero baseline, and a dashed peak
-        # line — each labelled in the gutter just left of the plot
-        grid = [
-            (base, "0", ""),
-            (spark_top, str(speak), ' stroke-dasharray="3 3"'),
-        ]
-        for gy, glabel, dash in grid:
+        # y-gridlines behind the area: a solid zero baseline plus dashed ticks
+        # up to the ceiling, each labelled in the gutter just left of the plot
+        for tv in ticks:
+            gy = base - (tv / axis_top) * spark_h
+            dash = "" if tv == 0 else ' stroke-dasharray="3 3"'
+            op = "0.25" if tv == 0 else "0.15"
             p.append(
                 f'<line x1="{bx}" y1="{gy:.1f}" x2="{W-32}" y2="{gy:.1f}" '
-                f'class="{S_MUTED}" stroke-opacity="0.25"{dash}/>'
+                f'class="{S_MUTED}" stroke-opacity="{op}"{dash}/>'
             )
             p.append(
                 f'<text x="{bx-6}" y="{gy+3:.1f}" class="{C_MUTED}" font-size="9" '
-                f'text-anchor="end">{glabel}</text>'
+                f'text-anchor="end">{tv}</text>'
             )
 
         p.append(
