@@ -302,6 +302,15 @@ def rel_age(iso: str) -> str:
     return f"updated {days // 30}mo ago"
 
 
+def days_since(iso: str) -> int | None:
+    """Whole days between an ISO timestamp and now, or None if unparseable."""
+    try:
+        d = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return (datetime.now(timezone.utc) - d).days
+
+
 def commit_days(repo: str, days: int = HEAT_DAYS) -> list[int]:
     """Commits per day on the default branch, oldest→newest, last `days`."""
     now = datetime.now(timezone.utc)
@@ -350,11 +359,23 @@ def collect_projects(limit: int = PROJECT_LIMIT) -> list[dict]:
             }
         )
     out.sort(key=lambda d: d["pushed_at"], reverse=True)
-    out = out[:limit]
-    for pr in out:  # only fetch commit history for the few we'll actually draw
+    # A project only earns a card if it saw real activity inside the heatmap
+    # window. pushed_at older than HEAT_DAYS can't hold a commit in that window,
+    # so it's a cheap pre-filter (no API call); the heat sum then confirms actual
+    # default-branch commits — a push to a side branch bumps pushed_at but leaves
+    # the heatmap empty, and we don't want those hollow cards.
+    active = []
+    for pr in out:
+        ago = days_since(pr["pushed_at"])
+        if ago is None or ago >= HEAT_DAYS:
+            continue
         pr["heat"] = commit_days(pr["name"])
         pr["commits"] = sum(pr["heat"])
-    return out
+        if pr["commits"] > 0:
+            active.append(pr)
+        if len(active) >= limit:
+            break
+    return active
 
 
 # ── my merged contributions (PRs that actually landed, grouped by repo) ───────
