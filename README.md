@@ -15,7 +15,7 @@ Private repos are not included in the widget scope. merged PR data is explicitly
 
 **1. Fork this repo.**
 
-Your GitHub username is detected automatically from the Actions environment — no code edits needed. Enable Actions on the fork if prompted (Settings → Actions → Allow all actions).
+Your GitHub username is detected automatically from the Actions environment with no code edits needed. Enable Actions on the fork if prompted (Settings → Actions → Allow all actions).
 
 **2. Set your display name and tagline** under Settings → Secrets and variables → Actions → **Variables** (not Secrets):
 
@@ -28,7 +28,7 @@ Your GitHub username is detected automatically from the Actions environment — 
 | `WIDGET_BAR_LIMIT` | `6` | Max merged-PR repo bars on the right |
 | `WIDGET_CORE_STARS` | `10000` | Star threshold for the key-insight caption to call a project "core" |
 
-The top-right tagline (e.g. `DATA SCIENCE · AGENTIC ENGINEERING`) is generated automatically from the data the card already reviews — the names, descriptions and languages of your projects plus the upstream repos you've landed PRs in — matched against a curated lexicon of domain labels. It's deterministic and needs no API key, so the same repos always yield the same keywords, and a fresh fork gets a fitting strip with nothing to configure.
+The top-right tagline (e.g. `DATA SCIENCE · AGENTIC ENGINEERING`) is generated automatically from the data the card already reviews — the names, descriptions and languages of your projects plus the upstream repos you've landed PRs in matched against a curated lexicon of domain labels. It's deterministic and needs no API key, so the same repos always yield the same keywords, and a fresh fork gets a fitting strip with nothing to configure.
 
 **3. Trigger the first run** manually: Actions → profile-widget → Run workflow. The widget generates immediately and commits `assets/widget.svg`. After that it refreshes daily at 06:17 UTC.
 
