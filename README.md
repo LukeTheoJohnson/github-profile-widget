@@ -28,7 +28,7 @@ Your GitHub username is detected automatically from the Actions environment with
 | `WIDGET_BAR_LIMIT` | `6` | Max merged-PR repo bars on the right |
 | `WIDGET_CORE_STARS` | `10000` | Star threshold for the key-insight caption to call a project "core" |
 
-The tagline text (e.g. `DATA SCIENCE · AGENTIC ENGINEERING`) is generated from data the card already reviews: names, descriptions and languages of your projects plus the upstream repos you've landed PRs. That info in matched against a lexicon of domain labels. It's deterministic and needs no API key, so the same repos always yield the same keywords, and a fresh fork gets a relevant headline.
+The tagline text (e.g. `DATA SCIENCE · AGENTIC ENGINEERING`) is generated from data the card already reviews: names, descriptions and languages of projects plus the upstream PRs. That info in matched against a lexicon of domain labels. It's deterministic and needs no API key, so the same repos always yield the same keywords, and a fresh fork gets a relevant headline.
 
 **3. Trigger the first run** manually: Actions → profile-widget → Run workflow. The widget generates immediately and commits `assets/widget.svg`. After that it refreshes daily at 06:17 UTC.
 
