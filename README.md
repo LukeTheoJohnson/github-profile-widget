@@ -44,7 +44,7 @@ The tagline text (e.g. `DATA SCIENCE · AGENTIC ENGINEERING`) is generated from 
 
 ## How it works
 
-- Zero dependencies — pure Python standard library (`urllib`, `json`, `pathlib`)
-- No API keys or secrets required — uses the built-in `GITHUB_TOKEN` provided by Actions
-- Generates a single SVG with CSS entrance animations gated behind `prefers-reduced-motion`
+- Python standard library (`urllib`, `json`, `pathlib`) with no external dependencies
+- Uses the built-in `GITHUB_TOKEN` provided by Actions.
+- Generates a single SVG with CSS entrance
 - The workflow handles push races with a fetch-reset-retry loop
