@@ -5,7 +5,7 @@
 <img src="assets/widget.svg" alt="Profile widget demo" width="100%"/>
 </a>
 
-This creates a profile summary widget which gets refreshed daily by GitHub Actions. It is generated using real contribution data from the user.
+This creates a dynamic profile widget using real contribution data from the user. It gets refreshed daily by GitHub Actions.
 
 Private repos are not included. merged PR data is explicitly scoped to public repositories (`is:public`).
 
