@@ -7,7 +7,7 @@
 
 This creates a profile summary widget which gets refreshed daily by GitHub Actions. It is generated using real contribution data from the user.
 
-Private repos do not get included. merged PR data is explicitly scoped to public repositories (`is:public`).
+Private repos are not included. merged PR data is explicitly scoped to public repositories (`is:public`).
 
 ---
 
