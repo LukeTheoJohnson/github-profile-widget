@@ -24,9 +24,10 @@ totals cover the last year; the per-project commit heatmaps cover the last
 Identity is env-configurable but needs nothing set: WIDGET_USER defaults to the
 repo owner when run in GitHub Actions, and the header name defaults to that
 account's GitHub display name ("Luke Johnson", not the login) — WIDGET_NAME
-overrides it. The top-right tagline auto-derives from the reviewed data (see derive_tagline):
-a couple of uppercase domain keywords mined from the projects and upstream repos
-on the card, so a fork gets a fitting strip with nothing to set. WIDGET_TAGLINE
+overrides it. The identified-stack strip beside the KEY INSIGHT eyebrow auto-derives
+from the reviewed data (see derive_tagline): a couple of uppercase domain keywords
+mined from the projects and upstream repos on the card, so a fork gets a fitting
+strip with nothing to set. The top-right corner holds only the date. WIDGET_TAGLINE
 overrides it with a literal string, or hides it when set to empty. Row counts
 are configurable too: WIDGET_PROJECT_LIMIT and WIDGET_BAR_LIMIT cap the two
 columns, and the card height stretches to fit whatever those allow.
@@ -459,8 +460,9 @@ def collect_contributions() -> dict:
 
 
 # ── auto-derived tagline ─────────────────────────────────────────────────────
-# The header's top-right strip (the old "data science · agentic engineering"
-# tagline) is regenerated from the data the card already reviewed rather than
+# The identified-stack strip beside the KEY INSIGHT eyebrow (the old top-right
+# "data science · agentic engineering" tagline) is regenerated from the data the
+# card already reviewed rather than
 # hand-set: the names, descriptions and languages of my own projects plus the
 # upstream repos I landed PRs in, scored against a small curated lexicon of
 # domain labels. Deterministic and offline like the rest of the card — the same
@@ -685,22 +687,23 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
         f'<text x="32" y="50" class="{C_FG}" font-size="27" font-weight="700">'
         f'{escape(name)}</text>'
     )
-    if tagline:
-        p.append(
-            f'<text x="{W-32}" y="44" class="{C_CYAN}" font-size="13" '
-            f'text-anchor="end" letter-spacing="2">{escape(t(tagline, 46))}</text>'
-        )
     p.append(
-        f'<text x="{W-32}" y="76" class="{C_MUTED}" font-size="19" '
+        f'<text x="{W-32}" y="50" class="{C_MUTED}" font-size="19" '
         f'text-anchor="end">{today}</text>'
     )
 
     # key-insight caption — a generated finding, not a totals summary. The
-    # eyebrow + coloured numerals read as one curated statement about the core
-    # (high-star) open-source work; the long tail is left to the merged-PR bars.
+    # eyebrow carries the identified stack (the auto-derived keyword strip) on
+    # the same line, so the coloured statement below stands alone as the
+    # finding about the core (high-star) open-source work; the long tail is
+    # left to the merged-PR bars.
+    stack = (
+        f'<tspan class="{C_MUTED}" dx="14">{escape(t(tagline, 46))}</tspan>'
+        if tagline else ""
+    )
     p.append(
         f'<text x="32" y="97" class="{C_CYAN}" font-size="11.5" '
-        f'letter-spacing="1.5">✦ KEY INSIGHT</text>'
+        f'letter-spacing="1.5">✦ KEY INSIGHT{stack}</text>'
     )
     # insight laid out as positioned runs so the merge/repo icons sit inline,
     # just left of their coloured numbers; textLength pins each text run's
