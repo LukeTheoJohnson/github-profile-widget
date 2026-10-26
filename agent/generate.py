@@ -312,8 +312,29 @@ def days_since(iso: str) -> int | None:
     return (datetime.now(timezone.utc) - d).days
 
 
+def is_bot_commit(cm: dict) -> bool:
+    """True for commits made by a bot account (github-actions[bot] etc.).
+
+    The daily widget refresh commits as github-actions[bot]; counting those
+    would light up the heatmap every day with no real work behind it. GitHub
+    marks such accounts with type "Bot"; the commit-level name/email check
+    covers the case where the email doesn't resolve to a user object.
+    """
+    for key in ("author", "committer"):
+        user = cm.get(key) or {}
+        if user.get("type") == "Bot" or "[bot]" in (user.get("login") or ""):
+            return True
+        meta = (cm.get("commit") or {}).get(key) or {}
+        if "[bot]" in (meta.get("name") or "") or "[bot]" in (meta.get("email") or ""):
+            return True
+    return False
+
+
 def commit_days(repo: str, days: int = HEAT_DAYS) -> list[int]:
-    """Commits per day on the default branch, oldest→newest, last `days`."""
+    """Human commits per day on the default branch, oldest→newest, last `days`.
+
+    Bot commits (the widget's own daily refresh) are skipped — see is_bot_commit.
+    """
     now = datetime.now(timezone.utc)
     since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
@@ -323,6 +344,8 @@ def commit_days(repo: str, days: int = HEAT_DAYS) -> list[int]:
         return [0] * days
     counts = [0] * days
     for cm in commits:
+        if is_bot_commit(cm):
+            continue
         info = cm.get("commit", {})
         ds = (info.get("author") or {}).get("date") or (
             info.get("committer") or {}
