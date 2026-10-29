@@ -802,7 +802,10 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
     bar_pitch = 30.0
     if n_bars > 1 and projects:
         bar_pitch = min(48.0, max(30.0, (left_bottom - 198 - 14) / (n_bars - 1)))
-    bars_end = 198 + (round((n_bars - 1) * bar_pitch) + 30 if n_bars else 22)
+    # when the rows stretch, the bars thicken with them (14px at the 30px
+    # pitch, ~22px at 48px) so a sparse column still reads as filled rows
+    bar_h = round(14 + (bar_pitch - 30) * 0.45)
+    bars_end = 198 + (round((n_bars - 1) * bar_pitch) + 16 + bar_h if n_bars else 22)
     has_spark = max(c["monthly"]) > 0  # all-zero months: skip the flatline chart
     # the merged-PR cadence chart is a full-width band under both columns,
     # separated from them by a rule; its height includes the x-axis labels
@@ -1005,27 +1008,28 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
         )
     for i, b in enumerate(bars):
         by = 198 + round(i * bar_pitch)
+        ty = by + round(bar_h / 2) + 4  # text baseline centred on the bar
         bw = max(int((b["value"] / maxv) * track_w), 9)
         if b.get("stars"):
             p.append(
-                f'<text x="{bx}" y="{by+11}" class="{C_ORANGE}" '
+                f'<text x="{bx}" y="{ty}" class="{C_ORANGE}" '
                 f'font-size="10.5">★</text>'
             )
             p.append(
-                f'<text x="{bx+44}" y="{by+11}" class="{C_MUTED}" '
+                f'<text x="{bx+44}" y="{ty}" class="{C_MUTED}" '
                 f'font-size="10.5" text-anchor="end">{kfmt(b["stars"])}</text>'
             )
         p.append(
-            f'<text x="{name_x}" y="{by+11}" class="{C_FG}" font-size="13">'
+            f'<text x="{name_x}" y="{ty}" class="{C_FG}" font-size="13.5">'
             f'{escape(t(b["name"], 28))}</text>'
         )
         p.append(
-            f'<rect x="{track_x}" y="{by}" width="{bw}" height="14" rx="4" '
+            f'<rect x="{track_x}" y="{by}" width="{bw}" height="{bar_h}" rx="4" '
             f'fill="url(#bar)" class="bar" '
             f'style="animation-delay:{0.1 + i * 0.08:.2f}s"/>'
         )
         p.append(
-            f'<text x="{track_x+track_w+10}" y="{by+11}" class="{C_GREEN}" '
+            f'<text x="{track_x+track_w+10}" y="{ty}" class="{C_GREEN}" '
             f'font-size="12.5" font-weight="600">{b["value"]}</text>'
         )
 
