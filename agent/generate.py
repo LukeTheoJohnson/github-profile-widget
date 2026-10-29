@@ -558,11 +558,17 @@ def collect_contributions() -> dict:
         r: s["merged"] for r, s in by_repo.items() if is_external(r) and s["merged"]
     }
     stars = {r: repo_stars(r) for r in external}
+    # the KEY INSIGHT calls these "OSS projects", so only repos that carry a
+    # licence count there — a public repo with none is merely source-available.
+    # GitHub reports NOASSERTION for an unrecognised licence file; that still
+    # means a licence exists, so any non-null value passes. Free: repo_meta is
+    # already cached from the star lookup.
+    oss = {r: n for r, n in external.items() if repo_meta(r).get("license")}
 
-    merged_upstream = sum(external.values())
-    merged_projects = len(external)
+    merged_upstream = sum(oss.values())
+    merged_projects = len(oss)
 
-    core = {r: n for r, n in external.items() if stars[r] >= CORE_STARS}
+    core = {r: n for r, n in oss.items() if stars[r] >= CORE_STARS}
     core_contributions = sum(core.values())
     core_projects = len(core)
 
