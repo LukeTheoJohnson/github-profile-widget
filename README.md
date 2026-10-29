@@ -27,7 +27,7 @@ Your GitHub username is detected automatically from the Actions environment with
 | `WIDGET_TAGLINE` | *auto-derived* | Identified-stack strip beside the KEY INSIGHT eyebrow. Left unset, it's generated from your data (see below). Set a literal string to override, e.g. `OPEN SOURCE · PYTHON · ML`, or an empty value to hide it |
 | `WIDGET_TAGLINE_KEYWORDS` | `3` | How many keywords the auto tagline shows |
 | `WIDGET_PROJECT_LIMIT` | `6` | Max cards on the left (own projects plus upstream PR cards) |
-| `WIDGET_BAR_LIMIT` | `10` | Max merged-PR repo bars on the right (10 bars sit level with 6 cards) |
+| `WIDGET_BAR_LIMIT` | `10` | Max merged-PR repo bars on the right |
 | `WIDGET_CORE_STARS` | `10000` | Star threshold for the key-insight caption to call a project "core" |
 
 The identified-stack strip beside the KEY INSIGHT eyebrow (e.g. `DATA SCIENCE · AGENTIC ENGINEERING`) is generated from data the card already reviews: names, descriptions and languages of projects plus the upstream PRs. That info in matched against a lexicon of domain labels. It's deterministic and needs no API key, so the same repos always yield the same keywords, and a fresh fork gets a relevant headline.

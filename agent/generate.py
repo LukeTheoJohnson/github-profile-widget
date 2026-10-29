@@ -85,7 +85,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 PROJECT_LIMIT = _env_int("WIDGET_PROJECT_LIMIT", 6)  # own-project cards drawn
-BAR_LIMIT = _env_int("WIDGET_BAR_LIMIT", 10)  # merged-PR repo bars drawn (10 rows sit level with 6 cards)
+BAR_LIMIT = _env_int("WIDGET_BAR_LIMIT", 10)  # merged-PR repo bars drawn
 CORE_STARS = _env_int("WIDGET_CORE_STARS", 10_000)  # star floor for a "core" project
 TAGLINE_MAX = _env_int("WIDGET_TAGLINE_KEYWORDS", 3)  # keywords in the auto tagline
 
@@ -795,17 +795,8 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
         pr["desc_line"] = t(pr["description"] or rel_age(pr["pushed_at"]), n)
 
     left_bottom = 188 + (len(projects) * pitch - 8 if projects else 22)
-    # bar rows are 30px apart by default but stretch (to at most 48px) so the
-    # last bar ends level with the last project card — the two columns read as
-    # one block rather than a tall left and a short right
-    n_bars = len(c["bars"])
-    bar_pitch = 30.0
-    if n_bars > 1 and projects:
-        bar_pitch = min(48.0, max(30.0, (left_bottom - 198 - 14) / (n_bars - 1)))
-    # when the rows stretch, the bars thicken with them (14px at the 30px
-    # pitch, ~22px at 48px) so a sparse column still reads as filled rows
-    bar_h = round(14 + (bar_pitch - 30) * 0.45)
-    bars_end = 198 + (round((n_bars - 1) * bar_pitch) + 16 + bar_h if n_bars else 22)
+    bar_pitch, bar_h = 30, 14  # fixed row spacing and bar thickness
+    bars_end = 198 + (len(c["bars"]) * bar_pitch if c["bars"] else 22)
     has_spark = max(c["monthly"]) > 0  # all-zero months: skip the flatline chart
     # the merged-PR cadence chart is a full-width band under both columns,
     # separated from them by a rule; its height includes the x-axis labels
@@ -1007,8 +998,8 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
             f'none merged upstream yet</text>'
         )
     for i, b in enumerate(bars):
-        by = 198 + round(i * bar_pitch)
-        ty = by + round(bar_h / 2) + 4  # text baseline centred on the bar
+        by = 198 + i * bar_pitch
+        ty = by + 11  # text baseline centred on the bar
         bw = max(int((b["value"] / maxv) * track_w), 9)
         if b.get("stars"):
             p.append(
