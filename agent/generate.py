@@ -864,7 +864,7 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
             ("i", "merge", C_PURPLE), ("n", str(c["core_contributions"]), C_PURPLE),
             ("t", " merged PRs across ", C_FG),
             ("i", "repo", C_BLUE), ("n", str(c["core_projects"]), C_BLUE),
-            ("t", " open-source projects, each with ", C_FG),
+            ("t", " OSS projects, each with ", C_FG),
             ("n", thr, C_ORANGE), ("t", " stars.", C_FG),
         ]
     elif c["merged_upstream"]:
@@ -872,7 +872,7 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
             ("i", "merge", C_PURPLE), ("n", str(c["merged_upstream"]), C_PURPLE),
             ("t", " merged PRs across ", C_FG),
             ("i", "repo", C_BLUE), ("n", str(c["merged_projects"]), C_BLUE),
-            ("t", " open-source projects.", C_FG),
+            ("t", " OSS projects.", C_FG),
         ]
     else:
         runs = [("t", "Building in the open — first contributions landing soon.", C_FG)]
