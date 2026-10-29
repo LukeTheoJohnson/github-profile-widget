@@ -4,7 +4,11 @@
 Reads real data from the GitHub API and renders a clean data-viz card — no
 agent theater, no synthetic loading traces. It leads with completed work:
 
-  left   my own public projects — language, stars and a commit-activity heatmap
+  left   what I'm working on — my own public projects (language mark, commit
+         heatmap) interleaved with upstream repos where one of my PRs saw
+         activity recently; those cards swap the language mark for a git-merge
+         (landed) or git-pull-request (still open) glyph, so a contribution to
+         someone else's project never reads as a project of mine
   right  merged pull requests grouped by the upstream project they landed in,
          plus a 12-month merged-PR cadence sparkline
 
@@ -18,8 +22,8 @@ spark line draws once; today's active cell pulses) and is gated behind
 prefers-reduced-motion, so reduced-motion viewers get the static final state.
 
 Two timeframes are in play and both are labelled on the card: pull-request
-totals cover the last year; the per-project commit heatmaps cover the last
-14 days.
+totals cover the last year; the per-card commit heatmaps cover the last
+14 days (for an upstream card, that's my commits on its PR branches).
 
 Identity is env-configurable but needs nothing set: WIDGET_USER defaults to the
 repo owner when run in GitHub Actions, and the header name defaults to that
@@ -278,12 +282,26 @@ def profile_name() -> str:
         return USER
 
 
+_REPO_META: dict[str, dict] = {}
+
+
+def repo_meta(full: str) -> dict:
+    """Cached /repos/{owner}/{name} payload ({} on any failure), so the star
+    column and the upstream activity cards share one fetch per repo."""
+    if full not in _REPO_META:
+        try:
+            _REPO_META[full] = gh(f"/repos/{full}") or {}
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            print(f"warn: repo fetch failed for {full} ({e})", file=sys.stderr)
+            _REPO_META[full] = {}
+    return _REPO_META[full]
+
+
 def repo_stars(full: str) -> int:
     """Stargazer count for an owner/name repo (0 on any failure)."""
     try:
-        return int(gh(f"/repos/{full}").get("stargazers_count", 0))
-    except (urllib.error.URLError, urllib.error.HTTPError, ValueError) as e:
-        print(f"warn: stars fetch failed for {full} ({e})", file=sys.stderr)
+        return int(repo_meta(full).get("stargazers_count", 0))
+    except (TypeError, ValueError):
         return 0
 
 
@@ -360,6 +378,42 @@ def commit_days(repo: str, days: int = HEAT_DAYS) -> list[int]:
     return counts
 
 
+def pr_commit_days(full: str, number: int, days: int = HEAT_DAYS) -> tuple[list[int], str]:
+    """My commits per day on one upstream PR, oldest→newest, last `days`, plus
+    the newest in-window commit timestamp ('' if none).
+
+    Commits on the PR branch are the honest "working on it" signal for a repo
+    I don't own — the same per-day shape as the own-project heatmaps. Commits
+    by anyone else (a maintainer pushing to the branch) and bot commits are
+    skipped; a commit whose author doesn't resolve to a GitHub account is kept,
+    since it's my branch.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        commits = gh(f"/repos/{full}/pulls/{number}/commits?per_page=100")
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        print(f"warn: PR commits fetch failed for {full}#{number} ({e})", file=sys.stderr)
+        return [0] * days, ""
+    counts = [0] * days
+    newest = ""
+    for cm in commits:
+        if is_bot_commit(cm):
+            continue
+        login = ((cm.get("author") or {}).get("login") or "").lower()
+        if login and login != USER.lower():
+            continue
+        ds = ((cm.get("commit") or {}).get("author") or {}).get("date") or ""
+        try:
+            d = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        day = (now - d).days
+        if 0 <= day < days:
+            counts[days - 1 - day] += 1  # newest on the right
+            newest = max(newest, ds)
+    return counts, newest
+
+
 # ── my own public projects (non-fork repos I push to) ────────────────────────
 def collect_projects(limit: int = PROJECT_LIMIT) -> list[dict]:
     try:
@@ -400,6 +454,72 @@ def collect_projects(limit: int = PROJECT_LIMIT) -> list[dict]:
         if len(active) >= limit:
             break
     return active
+
+
+# ── upstream repos one of my PRs touched recently (contribution cards) ───────
+def collect_upstream_activity(items: list[dict], days: int = HEAT_DAYS) -> list[dict]:
+    """One card per repo I don't own where a PR of mine saw activity in the
+    last `days`, shaped like a project card so the two interleave on the left.
+
+    The heatmap is my commits across that repo's recent PRs (pr_commit_days);
+    when none fall inside the window — a PR opened from the web UI, or one whose
+    only recent event is the maintainer merging it — the PR's own created/merged
+    days light a cell each, so the card still earns its place. The description
+    line is the newest PR's title, and the card records whether anything has
+    landed so the renderer can pick the git-merge or git-pull-request glyph.
+    `items` is the year-long PR search collect_contributions already ran.
+    """
+    recent: dict[str, list[dict]] = defaultdict(list)
+    for it in items:
+        full = it.get("repository_url", "").split("/repos/", 1)[-1]
+        if "/" not in full or full.split("/", 1)[0].lower() == USER.lower():
+            continue
+        ago = days_since(it.get("updated_at", ""))
+        if ago is None or ago >= days:
+            continue
+        recent[full].append(it)
+
+    cards: list[dict] = []
+    for full, prs in recent.items():
+        owner, repo = full.split("/", 1)
+        heat = [0] * days
+        active_at = ""
+        for it in prs:
+            counts, newest = pr_commit_days(full, it["number"], days)
+            heat = [a + b for a, b in zip(heat, counts)]
+            active_at = max(active_at, newest)
+        events = [
+            ts
+            for it in prs
+            for ts in (it.get("created_at"), (it.get("pull_request") or {}).get("merged_at"))
+            if ts
+        ]
+        in_window = [ts for ts in events if 0 <= (days_since(ts) or -1) < days]
+        if sum(heat) == 0:
+            for ts in in_window:
+                heat[days - 1 - days_since(ts)] += 1
+        if sum(heat) == 0:
+            continue
+        active_at = max([active_at, *in_window])
+        prs.sort(key=lambda it: it.get("created_at", ""), reverse=True)
+        meta = repo_meta(full)
+        cards.append(
+            {
+                "kind": "upstream",
+                "name": repo,
+                "owner": owner,
+                "full": full,
+                "language": meta.get("language") or "",
+                "stars": meta.get("stargazers_count", 0),
+                "description": (prs[0].get("title") or "").strip(),
+                "pushed_at": active_at,
+                "heat": heat,
+                "commits": sum(heat),
+                "prs": len(prs),
+                "merged": any((it.get("pull_request") or {}).get("merged_at") for it in prs),
+            }
+        )
+    return cards
 
 
 # ── my merged contributions (PRs that actually landed, grouped by repo) ───────
@@ -479,6 +599,7 @@ def collect_contributions() -> dict:
         "core_projects": core_projects,
         "bars": bars,
         "total_prs": len(items),
+        "items": items,  # reused by collect_upstream_activity
     }
 
 
@@ -662,7 +783,10 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
     # the language mark + name (with the heatmap opposite), then a description
     # line with the commit count opposite it.
     for pr in projects:
-        pr["desc_line"] = t(pr["description"] or rel_age(pr["pushed_at"]), 44)
+        # upstream cards carry a longer count label ("2 PRs · 7 commits"), so
+        # their description line gives up a few characters to it
+        n = 36 if pr.get("kind") == "upstream" else 44
+        pr["desc_line"] = t(pr["description"] or rel_age(pr["pushed_at"]), n)
 
     left_bottom = 188 + (len(projects) * pitch - 8 if projects else 22)
     bars_end = 198 + (len(c["bars"]) * 30 if c["bars"] else 22)
@@ -675,7 +799,9 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
     H = max(left_bottom, right_bottom) + 30
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    logo_syms = logo_defs(pr.get("language", "") for pr in projects)
+    logo_syms = logo_defs(
+        pr.get("language", "") for pr in projects if pr.get("kind") != "upstream"
+    )
     p: list[str] = []
 
     p.append(
@@ -789,18 +915,37 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
                 f'<rect x="{cx}" y="{cy}" width="{cw}" height="{card_h}" rx="10" '
                 f'class="{C_PANEL}"/>'
             )
-            mark, name_x = _lang_mark(pr["language"], cx + 16, cy + 9, 14)
-            if not pr["language"]:
-                name_x = cx + 16
-            p.append(mark)
-            p.append(
-                f'<text x="{name_x}" y="{cy+21}" class="{C_FG}" font-size="15" '
-                f'font-weight="600">{escape(t(pr["name"], 20))}</text>'
-            )
+            if pr.get("kind") == "upstream":
+                # a contribution, not a project of mine: the language mark's
+                # slot holds a git-merge (landed, purple) or git-pull-request
+                # (still open, green) glyph — GitHub's own PR-state colours —
+                # and the name is owner/repo with the owner dimmed
+                glyph, col = ("merge", C_PURPLE) if pr.get("merged") else ("pr", C_GREEN)
+                p.append(octicon(glyph, cx + 16, cy + 9, col, 14))
+                name_x = cx + 16 + 14 + 6
+                owner = t(pr["owner"], 14)
+                repo = t(pr["name"], max(26 - len(owner) - 1, 8))
+                p.append(
+                    f'<text x="{name_x}" y="{cy+21}" class="{C_FG}" font-size="15" '
+                    f'font-weight="600"><tspan class="{C_MUTED}" font-weight="400">'
+                    f'{escape(owner)}/</tspan>{escape(repo)}</text>'
+                )
+                n_prs, n_cm = pr.get("prs", 0), pr.get("commits", 0)
+                count = (f'{n_prs} PR{"s" if n_prs != 1 else ""} · '
+                         f'{n_cm} commit{"s" if n_cm != 1 else ""}')
+            else:
+                mark, name_x = _lang_mark(pr["language"], cx + 16, cy + 9, 14)
+                if not pr["language"]:
+                    name_x = cx + 16
+                p.append(mark)
+                p.append(
+                    f'<text x="{name_x}" y="{cy+21}" class="{C_FG}" font-size="15" '
+                    f'font-weight="600">{escape(t(pr["name"], 20))}</text>'
+                )
+                count = f'{pr.get("commits", 0)} commits'
             p.append(
                 f'<text x="{cx+cw-16}" y="{cy+38}" class="{C_MUTED}" '
-                f'font-size="10.5" text-anchor="end">'
-                f'{pr.get("commits", 0)} commits</text>'
+                f'font-size="10.5" text-anchor="end">{escape(count)}</text>'
             )
             p.append(
                 f'<text x="{cx+16}" y="{cy+38}" class="{C_MUTED}" '
@@ -944,8 +1089,14 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
 
 
 def main():
-    projects = collect_projects()
     contrib = collect_contributions()
+    # own projects and upstream contribution cards share the left column,
+    # newest activity first, under one cap
+    projects = sorted(
+        collect_projects() + collect_upstream_activity(contrib["items"]),
+        key=lambda d: d["pushed_at"],
+        reverse=True,
+    )[:PROJECT_LIMIT]
     name = NAME_ENV or profile_name()  # display name, not the login, unless set
     # unset → derive from the data; explicit value (incl. "") wins verbatim
     tagline = derive_tagline(projects, contrib) if TAGLINE_ENV is None else TAGLINE_ENV
@@ -954,7 +1105,9 @@ def main():
     OUT.write_text(svg, encoding="utf-8")
     print(
         f"wrote {OUT} ({len(svg)} bytes) · "
-        f"{len(projects)} projects / {contrib['merged']} merged / "
+        f"{len(projects)} cards "
+        f"({sum(1 for pr in projects if pr.get('kind') == 'upstream')} upstream) / "
+        f"{contrib['merged']} merged / "
         f"{len(contrib['bars'])} bars · tagline: {tagline or '(none)'}"
     )
 
