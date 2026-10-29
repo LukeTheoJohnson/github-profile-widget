@@ -9,8 +9,8 @@ agent theater, no synthetic loading traces. It leads with completed work:
          activity recently; those cards swap the language mark for a git-merge
          (landed) or git-pull-request (still open) glyph, so a contribution to
          someone else's project never reads as a project of mine
-  right  merged pull requests grouped by the upstream project they landed in,
-         plus a 12-month merged-PR cadence sparkline
+  right  merged pull requests grouped by the upstream project they landed in
+  bottom a full-width 12-month merged-PR cadence chart under both columns
 
 The card ships two deliberately-designed palettes — Tokyo Night (dark) and a
 Tokyo Day sibling (light) — and swaps between them with a
@@ -750,7 +750,7 @@ def _style_block() -> str:
         "animation:grow .55s cubic-bezier(.2,.7,.3,1) backwards}"
         ".cell{animation:fade .45s ease-out backwards}"
         ".pulse{animation:pulse 3s ease-in-out infinite}"
-        ".line{stroke-dasharray:620;stroke-dashoffset:620;"
+        ".line{stroke-dasharray:1200;stroke-dashoffset:1200;"
         "animation:draw 1s ease-out .25s forwards}"
         ".fill,.dot{animation:fade .7s ease-out .7s backwards}"
         "}"
@@ -797,12 +797,14 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
     left_bottom = 188 + (len(projects) * pitch - 8 if projects else 22)
     bars_end = 198 + (len(c["bars"]) * 30 if c["bars"] else 22)
     has_spark = max(c["monthly"]) > 0  # all-zero months: skip the flatline chart
-    spark_label_y = bars_end + 10
-    spark_top = spark_label_y + 10
-    spark_h = 48
-    # sparkline height includes room for the x-axis month labels
-    right_bottom = (spark_top + spark_h + 18) if has_spark else bars_end
-    H = max(left_bottom, right_bottom) + 30
+    # the merged-PR cadence chart is a full-width band under both columns,
+    # separated from them by a rule; its height includes the x-axis labels
+    cols_bottom = max(left_bottom, bars_end)
+    rule_y = cols_bottom + 16
+    spark_label_y = rule_y + 26
+    spark_top = spark_label_y + 14
+    spark_h = 100
+    H = ((spark_top + spark_h + 18) if has_spark else cols_bottom) + 30
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     logo_syms = logo_defs(
@@ -911,7 +913,7 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
         f'letter-spacing="1.5">PROJECTS I&apos;M WORKING ON</text>'
     )
     p.append(
-        f'<text x="442" y="174" class="{C_MUTED}" font-size="10" '
+        f'<text x="442" y="174" class="{C_MUTED}" font-size="12" '
         f'text-anchor="end" letter-spacing="0.5">commits / {HEAT_DAYS}d</text>'
     )
     cy = 188
@@ -1020,14 +1022,20 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
         )
         by += 30
 
-    # ── merged-PR cadence, last 12 months (area sparkline with light axes);
-    # skipped entirely when the year is all zeros — no flatline chart ────────
+    # ── merged-PR cadence, last 12 months: a full-width area chart across the
+    # bottom of the card, under both columns; skipped entirely when the year
+    # is all zeros — no flatline chart ───────────────────────────────────────
     monthly = c["monthly"]
     if has_spark:
         p.append(
-            f'<text x="{bx}" y="{spark_label_y}" class="{C_MUTED}" font-size="10" '
+            f'<line x1="32" y1="{rule_y}" x2="{W-32}" y2="{rule_y}" '
+            f'class="{S_MUTED}" stroke-opacity="0.25"/>'
+        )
+        p.append(
+            f'<text x="32" y="{spark_label_y}" class="{C_MUTED}" font-size="11" '
             f'letter-spacing="1">MERGED PRs / MONTH</text>'
         )
+        bx = 32 + 24  # plot origin; the gutter left of it holds the y labels
         sw = W - 32 - bx
         speak = max(monthly)
         # a rounded axis ceiling so the y-axis carries several round ticks
@@ -1052,7 +1060,7 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
                 f'class="{S_MUTED}" stroke-opacity="{op}"{dash}/>'
             )
             p.append(
-                f'<text x="{bx-6}" y="{gy+3:.1f}" class="{C_MUTED}" font-size="9" '
+                f'<text x="{bx-8}" y="{gy+3:.1f}" class="{C_MUTED}" font-size="10" '
                 f'text-anchor="end">{tv}</text>'
             )
 
@@ -1062,10 +1070,10 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
         )
         p.append(
             f'<polyline points="{line}" fill="none" class="line {S_GREEN}" '
-            f'stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'
+            f'stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'
         )
         p.append(
-            f'<circle cx="{pts[-1][0]:.1f}" cy="{pts[-1][1]:.1f}" r="3" '
+            f'<circle cx="{pts[-1][0]:.1f}" cy="{pts[-1][1]:.1f}" r="3.5" '
             f'class="{C_GREEN} dot"/>'
         )
 
@@ -1081,13 +1089,13 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
 
         # only the two ends carry a 2-digit year, so the span's year boundary is
         # legible without cluttering the axis; the midpoint stays a bare month
-        axis_y = base + 13
+        axis_y = base + 14
         for idx, anchor, yr in ((0, "start", True),
                                 (len(monthly) // 2, "middle", False),
                                 (len(monthly) - 1, "end", True)):
             p.append(
                 f'<text x="{pts[idx][0]:.1f}" y="{axis_y}" class="{C_MUTED}" '
-                f'font-size="9" text-anchor="{anchor}">{_mlabel(idx, yr)}</text>'
+                f'font-size="10" text-anchor="{anchor}">{_mlabel(idx, yr)}</text>'
             )
 
     p.append("</svg>")
