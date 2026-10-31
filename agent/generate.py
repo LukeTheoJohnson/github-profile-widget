@@ -458,21 +458,24 @@ def collect_projects(limit: int = PROJECT_LIMIT) -> list[dict]:
 
 # ── upstream repos one of my PRs touched recently (contribution cards) ───────
 def collect_upstream_activity(items: list[dict], days: int = HEAT_DAYS) -> list[dict]:
-    """One card per repo I don't own where a PR of mine saw activity in the
-    last `days`, shaped like a project card so the two interleave on the left.
+    """One card per repo I don't own where a merged PR of mine saw activity in
+    the last `days`, shaped like a project card so the two interleave on the
+    left. Open (and closed-unmerged) PRs are left off — only landed work earns
+    a card.
 
     The heatmap is my commits across that repo's recent PRs (pr_commit_days);
     when none fall inside the window — a PR opened from the web UI, or one whose
     only recent event is the maintainer merging it — the PR's own created/merged
     days light a cell each, so the card still earns its place. The description
-    line is the newest PR's title, and the card records whether anything has
-    landed so the renderer can pick the git-merge or git-pull-request glyph.
+    line is the newest PR's title.
     `items` is the year-long PR search collect_contributions already ran.
     """
     recent: dict[str, list[dict]] = defaultdict(list)
     for it in items:
         full = it.get("repository_url", "").split("/repos/", 1)[-1]
         if "/" not in full or full.split("/", 1)[0].lower() == USER.lower():
+            continue
+        if not (it.get("pull_request") or {}).get("merged_at"):
             continue
         ago = days_since(it.get("updated_at", ""))
         if ago is None or ago >= days:
@@ -516,7 +519,6 @@ def collect_upstream_activity(items: list[dict], days: int = HEAT_DAYS) -> list[
                 "heat": heat,
                 "commits": sum(heat),
                 "prs": len(prs),
-                "merged": any((it.get("pull_request") or {}).get("merged_at") for it in prs),
             }
         )
     return cards
@@ -926,11 +928,9 @@ def render_svg(projects: list[dict], c: dict, name: str = "", tagline: str = "")
             )
             if pr.get("kind") == "upstream":
                 # a contribution, not a project of mine: the language mark's
-                # slot holds a git-merge (landed, purple) or git-pull-request
-                # (still open, green) glyph — GitHub's own PR-state colours —
-                # and the name is owner/repo with the owner dimmed
-                glyph, col = ("merge", C_PURPLE) if pr.get("merged") else ("pr", C_GREEN)
-                p.append(octicon(glyph, cx + 16, cy + 9, col, 14))
+                # slot holds a git-merge glyph in GitHub's merged purple, and
+                # the name is owner/repo with the owner dimmed
+                p.append(octicon("merge", cx + 16, cy + 9, C_PURPLE, 14))
                 name_x = cx + 16 + 14 + 6
                 owner = t(pr["owner"], 14)
                 repo = t(pr["name"], max(26 - len(owner) - 1, 8))

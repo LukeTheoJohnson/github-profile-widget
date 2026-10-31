@@ -9,7 +9,7 @@ This creates a dynamic profile widget using real contribution data from the user
 
 Private repos are not included. merged PR data is explicitly scoped to public repositories (`is:public`).
 
-The left column is "what I'm working on" over the last 14 days: your own repos with recent commits, interleaved with upstream repos where one of your PRs saw activity. Upstream cards swap the language mark for a git-merge (landed) or git-pull-request (still open) glyph and show the repo as `owner/name`, so a contribution to someone else's project never reads as one of yours.
+The left column is "what I'm working on" over the last 14 days: your own repos with recent commits, interleaved with upstream repos where one of your merged PRs saw activity (open PRs are left off). Upstream cards swap the language mark for a git-merge glyph and show the repo as `owner/name`, so a contribution to someone else's project never reads as one of yours.
 
 ---
 
@@ -26,7 +26,7 @@ Your GitHub username is detected automatically from the Actions environment with
 | `WIDGET_NAME` | your GitHub display name | Header name. Defaults to the `name` on your GitHub profile (e.g. `Luke Johnson`), falling back to your username |
 | `WIDGET_TAGLINE` | *auto-derived* | Identified-stack strip beside the KEY INSIGHT eyebrow. Left unset, it's generated from your data (see below). Set a literal string to override, e.g. `OPEN SOURCE · PYTHON · ML`, or an empty value to hide it |
 | `WIDGET_TAGLINE_KEYWORDS` | `3` | How many keywords the auto tagline shows |
-| `WIDGET_PROJECT_LIMIT` | `6` | Max cards on the left (own projects plus upstream PR cards) |
+| `WIDGET_PROJECT_LIMIT` | `6` | Max cards on the left (own projects plus upstream merged-PR cards) |
 | `WIDGET_BAR_LIMIT` | `10` | Max merged-PR repo bars on the right |
 | `WIDGET_CORE_STARS` | `10000` | Star threshold for the key-insight caption to call a project "core" |
 
